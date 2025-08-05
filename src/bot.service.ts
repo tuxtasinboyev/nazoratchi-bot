@@ -8,9 +8,10 @@ import { GetMeResult } from './bot.interface';
 export class BotService implements OnModuleInit {
     constructor(private prisma: PrismaService) { }
 
-    private badWordCounter = new Map<number, number>();
+    private runningBots = new Set<string>(); 
+    private badWordCounters = new Map<string, Map<number, number>>(); 
 
-    async onModuleInit() {
+    async onModuleInit() {  
         const bots = await this.prisma.botModel.findMany({
             where: { name: 'Nazoratchi bot' },
         });
@@ -20,20 +21,30 @@ export class BotService implements OnModuleInit {
                 where: { botModelId: botModel.id },
             });
 
-            for (const botTokenLog of tokenlar) {
-                await this.startBot(botTokenLog.botToken, botTokenLog.userId);
-            }
+            await Promise.all(
+                tokenlar.map((botTokenLog) =>
+                    this.startBot(botTokenLog.botToken, botTokenLog.userId),
+                ),
+            );
         }
     }
 
     async startBot(token: string, userId: number) {
+        if (this.runningBots.has(token)) {
+            console.log(`⚠️ BOT oldin ishga tushgan: ${token}`);
+            return;
+        }
+
+        this.runningBots.add(token);
+        this.badWordCounters.set(token, new Map());
+
         const bot = new Telegraf(token);
 
         const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
         const data = (await res.json()) as GetMeResult;
 
         if (!data.ok) {
-            throw new NotFoundException('Bot token xato yoki bloklangan!');
+            throw new NotFoundException('❌ Bot token xato yoki bloklangan!');
         }
 
         const badWords = await this.prisma.badWord.findMany();
@@ -73,8 +84,9 @@ export class BotService implements OnModuleInit {
                 if (hasBadWord && !isAdmin) {
                     await ctx.deleteMessage();
 
-                    const current = this.badWordCounter.get(from.id) || 0;
-                    this.badWordCounter.set(from.id, current + 1);
+                    const counter = this.badWordCounters.get(token)!;
+                    const current = counter.get(from.id) || 0;
+                    counter.set(from.id, current + 1);
 
                     if (current + 1 >= 3) {
                         try {
@@ -103,9 +115,3 @@ export class BotService implements OnModuleInit {
         process.once('SIGTERM', () => bot.stop('SIGTERM'));
     }
 }
-
-
-
-
-
-
