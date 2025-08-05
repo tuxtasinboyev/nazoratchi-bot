@@ -8,13 +8,18 @@ import { GetMeResult } from './bot.interface';
 export class BotService implements OnModuleInit {
     constructor(private prisma: PrismaService) { }
 
+    private badWordCounter = new Map<number, number>();
+
     async onModuleInit() {
         const bots = await this.prisma.botModel.findUnique({
             where: { name: 'Nazoratchi bot' },
         });
 
-        const token = await this.prisma.userBot.findMany({ where: { botModelId: bots?.id } })
-        for (const botTokenLog of token) {
+        const tokenlar = await this.prisma.userBot.findMany({
+            where: { botModelId: bots?.id },
+        });
+
+        for (const botTokenLog of tokenlar) {
             await this.startBot(botTokenLog.botToken, botTokenLog.userId);
         }
     }
@@ -26,7 +31,7 @@ export class BotService implements OnModuleInit {
         const data = (await res.json()) as GetMeResult;
 
         if (!data.ok) {
-            throw new NotFoundException('Bot token xato yoki bot bloklangan!');
+            throw new NotFoundException('Bot token xato yoki bloklangan!');
         }
 
         const badWords = await this.prisma.badWord.findMany();
@@ -43,40 +48,54 @@ export class BotService implements OnModuleInit {
                 const isSpam =
                     /(http|https|\.com|\.uz|@|t\.me|telegram\.me|reklama|obuna|like)/i.test(lowerMessage) || hasMedia;
 
-                const isAdmin = (await ctx.getChatAdministrators())
-                    .some(admin => admin.user.id === from?.id);
+                const isAdmin = (await ctx.getChatAdministrators()).some(
+                    (admin) => admin.user.id === from?.id,
+                );
 
                 if (isSpam && !isAdmin) {
                     await ctx.deleteMessage();
-                    const sent = await ctx.reply(`${name}, iltimos reklama yoki video tarqatmang! ❌`);
+                    const sent = await ctx.reply(`${name}, iltimos reklama yoki media yubormang! ❌`);
                     setTimeout(() => {
                         ctx.deleteMessage(sent.message_id).catch(() => { });
                     }, 5000);
                     return;
                 }
 
-                const hasBadWord = badWords.some(word => {
+                const hasBadWord = badWords.some((word) => {
                     const uzbekRegex = new RegExp(`\\b${word.uzbek.toLowerCase()}\\b`, 'i');
                     const russianRegex = new RegExp(`\\b${word.russian.toLowerCase()}\\b`, 'i');
                     const englishRegex = new RegExp(`\\b${word.english.toLowerCase()}\\b`, 'i');
-
                     return uzbekRegex.test(lowerMessage) || russianRegex.test(lowerMessage) || englishRegex.test(lowerMessage);
                 });
 
                 if (hasBadWord && !isAdmin) {
                     await ctx.deleteMessage();
-                    const sent = await ctx.reply(`⛔️ ${name}, iltimos so'kinmang.`);
-                    setTimeout(() => {
-                        ctx.deleteMessage(sent.message_id).catch(() => { });
-                    }, 5000);
+
+                    const current = this.badWordCounter.get(from.id) || 0;
+                    this.badWordCounter.set(from.id, current + 1);
+
+                    if (current + 1 >= 3) {
+                        try {
+                            await ctx.banChatMember(from.id);
+                            await ctx.reply(`🚫 ${name}, siz 3 marta so‘kinib, guruhdan chetlatildingiz!`);
+                        } catch (e) {
+                            await ctx.reply(`❌ ${name} bloklanishda xatolik yuz berdi.`);
+                        }
+                    } else {
+                        const sent = await ctx.reply(`⛔️ ${name}, iltimos so'kinmang. (${current + 1}/3)`);
+                        setTimeout(() => {
+                            ctx.deleteMessage(sent.message_id).catch(() => { });
+                        }, 5000);
+                    }
                     return;
                 }
             } catch (err) {
-                throw new NotFoundException(err)
+                console.error('❌ Message error:', err.message);
             }
         });
 
         await bot.launch();
+        console.log(`🤖 ${data.result.username} BOT ishga tushdi!`);
 
         process.once('SIGINT', () => bot.stop('SIGINT'));
         process.once('SIGTERM', () => bot.stop('SIGTERM'));
