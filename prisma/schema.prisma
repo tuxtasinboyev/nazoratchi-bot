@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum BotStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PaymentGateway {
+  PAYME
+  CLICK
+  CASH
+}
+
+enum WebhookStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  fullName  String
+  email     String   @unique
+  phone     String?
+  avatar    String?
+  password  String?
+  role      UserRole @default(USER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  sessions     UserSession[]
+  profile      UserProfile?
+  payments     Payment[]
+  botTokenLogs BotTokenLog[]
+  userBots     UserBot[]
+  plans        PaymentPlan[]
+  OAuthAccount OAuthAccount[]
+  Transaction  Transaction[]
+  Favorite     Favorite[]
+  Comment      Comment[]
+  Rating       Rating[]
+
+  @@map("users")
+}
+
+model OAuthAccount {
+  id             Int     @id @default(autoincrement())
+  userId         Int
+  provider       String
+  providerUserId String
+  accessToken    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([provider, providerUserId])
+  @@map("oauth_accounts")
+}
+
+model UserProfile {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @unique
+  isActive   Boolean   @default(true)
+  status     BotStatus @default(PENDING)
+  checkedAt  DateTime  @default(now())
+  receivedAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_profiles")
+}
+
+model UserSession {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  userAgent String
+  ipAddress String
+  location  String?
+  isValid   Boolean  @default(true)
+  checkedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+model Category {
+  id          Int           @id @default(autoincrement())
+  name        String        @unique
+  isActive    Boolean       @default(true)
+  startedAt   DateTime      @default(now())
+  UserBot     UserBot[]
+  PaymentPlan PaymentPlan[]
+  BotModel    BotModel[]
+
+  @@map("categories")
+}
+
+model BotModel {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  categoryId Int
+  createdAt  DateTime @default(now())
+
+  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  userBots UserBot[]
+
+  @@index([categoryId])
+  @@map("bot_models")
+}
+
+model UserBot {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  categoryId Int
+  botModelId Int?
+  botToken   String    @unique
+  isActive   Boolean   @default(true)
+  startedAt  DateTime  @default(now())
+  expiresAt  DateTime?
+  status     BotStatus @default(PENDING)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  botModel BotModel? @relation(fields: [botModelId], references: [id], onDelete: SetNull)
+
+  payments    Payment[]
+  Transaction Transaction[]
+  Favorite    Favorite[]
+  Comment     Comment[]
+  Rating      Rating[]
+
+  @@index([userId])
+  @@index([categoryId])
+  @@index([botModelId])
+  @@map("user_bots")
+}
+
+model PaymentPlan {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  name       String
+  amount     Decimal
+  duration   Int
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  payments Payment[]
+
+  @@map("payment_plans")
+}
+
+model Payment {
+  id             Int            @id @default(autoincrement())
+  userId         Int
+  userBotId      Int
+  planId         Int
+  amount         Decimal
+  status         PaymentStatus  @default(PENDING)
+  paymentGateway PaymentGateway @default(CASH)
+  transactionId  String         @unique @db.VarChar(255)
+  paidAt         DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime       @default(now())
+  verifiedAt     DateTime?
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bot      UserBot      @relation(fields: [userBotId], references: [id], onDelete: Cascade)
+  plan     PaymentPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  webhooks WebhookLog[]
+
+  @@index([userId])
+  @@index([userBotId])
+  @@index([planId])
+  @@map("payments")
+}
+
+model BotTokenLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  botToken      String   @db.VarChar(255)
+  isValid       Boolean
+  checkedAt     DateTime @default(now())
+  notes         String?
+  invalidReason String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("bot_token_logs")
+}
+
+model WebhookLog {
+  id           Int            @id @default(autoincrement())
+  paymentId    Int
+  gatewayName  String         @db.VarChar(100)
+  payload      Json
+  statusCode   Int
+  status       WebhookStatus?
+  errorCode    String?
+  errorMessage String?
+  receivedAt   DateTime       @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("webhook_logs")
+}
+
+model Transaction {
+  id           String    @id @default(uuid())
+  pid          String    @unique
+  amount       Decimal
+  perform_time DateTime?
+  create_time  DateTime?
+  cancel_time  DateTime?
+  state        Int
+  reason       Int?
+  userId       Int?
+  user         User?     @relation(references: [id], fields: [userId], onDelete: SetNull)
+  userBotId    Int?
+  userBot      UserBot?  @relation(fields: [userBotId], references: [id], onDelete: SetNull)
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  userBotId Int
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userBot UserBot @relation(fields: [userBotId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, userBotId])
+  @@map("favorites")
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  userBotId Int
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userBot UserBot @relation(fields: [userBotId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userBotId])
+  @@map("comments")
+}
+
+model Rating {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  userBotId Int
+  rating    Int
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userBot UserBot @relation(fields: [userBotId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, userBotId])
+  @@map("ratings")
+}
+
+model BadWord {
+  id        Int      @id @default(autoincrement())
+  uzbek     String
+  russian   String
+  english   String
+  createdAt DateTime @default(now())
+
+  @@map("bad_words")
+}
