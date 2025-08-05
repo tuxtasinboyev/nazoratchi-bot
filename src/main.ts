@@ -1,28 +1,15 @@
-  import { NestFactory } from '@nestjs/core';
-  import { AppModule } from './app.module';
-  import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { BotService } from './bot.service';
 
-  async function bootstrap() {
-    const app = await NestFactory.create(AppModule); 
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
 
-    app.connectMicroservice<MicroserviceOptions>({
-      transport: Transport.RMQ,
-      options: {
-        urls: [
-          'amqps://fhrzlrdw:hDfPFXgmeA3RbotR3urp0T3Dp2x8u7NY@kebnekaise.lmq.cloudamqp.com/fhrzlrdw',
-        ],
-        queue: 'observer_bot_queue',
-        queueOptions: {
-          durable: false,
-        },
-      },
-    });
+  const botService = app.get(BotService);
+  await botService.startWebhookBots(app);
 
-    await app.startAllMicroservices();
-    console.log('🟢 Observer Bot Microservice is listening via RabbitMQ');
+  const PORT = process.env.PORT || 4000;
+  await app.listen(PORT);
+}
 
-    // await app.listen(process.env.PORT || 3000);
-    // console.log(`🌐 Fake HTTP server ishlayapti portda: ${process.env.PORT || 3000}`);
-  }
-
-  bootstrap();
+bootstrap();

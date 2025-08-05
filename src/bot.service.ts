@@ -1,39 +1,38 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Telegraf, Context } from 'telegraf';
 import { PrismaService } from './prisma/prisma.service';
 import fetch from 'node-fetch';
 import { GetMeResult } from './bot.interface';
+import { INestApplication } from '@nestjs/common';
 
 @Injectable()
-export class BotService implements OnModuleInit {
+export class BotService {
     constructor(private prisma: PrismaService) { }
 
-    private runningBots = new Set<string>(); 
-    private badWordCounters = new Map<string, Map<number, number>>(); 
+    private app: INestApplication;
+    private runningBots = new Set<string>();
+    private badWordCounters = new Map<string, Map<number, number>>();
 
-    async onModuleInit() {  
+    async startWebhookBots(app: INestApplication) {
+        this.app = app;
+
         const bots = await this.prisma.botModel.findMany({
             where: { name: 'Nazoratchi bot' },
         });
 
         for (const botModel of bots) {
-            const tokenlar = await this.prisma.userBot.findMany({
+            const tokens = await this.prisma.userBot.findMany({
                 where: { botModelId: botModel.id },
             });
 
-            await Promise.all(
-                tokenlar.map((botTokenLog) =>
-                    this.startBot(botTokenLog.botToken, botTokenLog.userId),
-                ),
-            );
+            for (const token of tokens) {
+                await this.startBot(token.botToken, token.userId);
+            }
         }
     }
 
     async startBot(token: string, userId: number) {
-        if (this.runningBots.has(token)) {
-            console.log(`⚠️ BOT oldin ishga tushgan: ${token}`);
-            return;
-        }
+        if (this.runningBots.has(token)) return;
 
         this.runningBots.add(token);
         this.badWordCounters.set(token, new Map());
@@ -43,9 +42,7 @@ export class BotService implements OnModuleInit {
         const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
         const data = (await res.json()) as GetMeResult;
 
-        if (!data.ok) {
-            throw new NotFoundException('❌ Bot token xato yoki bloklangan!');
-        }
+        if (!data.ok) throw new NotFoundException('Bot token xato yoki bloklangan!');
 
         const badWords = await this.prisma.badWord.findMany();
 
@@ -58,12 +55,8 @@ export class BotService implements OnModuleInit {
                 const lowerMessage = messageText.toLowerCase();
                 const hasMedia = msg.video || msg.audio || msg.photo || msg.document || msg.sticker || msg.voice;
 
-                const isSpam =
-                    /(http|https|\.com|\.uz|@|t\.me|telegram\.me|reklama|obuna|like)/i.test(lowerMessage) || hasMedia;
-
-                const isAdmin = (await ctx.getChatAdministrators()).some(
-                    (admin) => admin.user.id === from?.id,
-                );
+                const isSpam = /(http|https|\.com|\.uz|@|t\.me|telegram\.me|reklama|obuna|like)/i.test(lowerMessage) || hasMedia;
+                const isAdmin = (await ctx.getChatAdministrators()).some((admin) => admin.user.id === from?.id);
 
                 if (isSpam && !isAdmin) {
                     await ctx.deleteMessage();
@@ -101,17 +94,17 @@ export class BotService implements OnModuleInit {
                             ctx.deleteMessage(sent.message_id).catch(() => { });
                         }, 5000);
                     }
-                    return;
                 }
             } catch (err) {
-                console.error('❌ Message error:', err.message);
+                console.error('Message error:', err.message);
             }
         });
 
-        await bot.launch();
-        console.log(`🤖 ${data.result.username} BOT ishga tushdi!`);
+        const webhookPath = `/webhook/${userId}`;
+        const externalUrl = process.env.RENDER_EXTERNAL_URL;
+        await bot.telegram.setWebhook(`${externalUrl}${webhookPath}`);
 
-        process.once('SIGINT', () => bot.stop('SIGINT'));
-        process.once('SIGTERM', () => bot.stop('SIGTERM'));
+        const expressApp = this.app.getHttpAdapter().getInstance();
+        expressApp.use(bot.webhookCallback(webhookPath));
     }
 }
