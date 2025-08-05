@@ -11,16 +11,18 @@ export class BotService implements OnModuleInit {
     private badWordCounter = new Map<number, number>();
 
     async onModuleInit() {
-        const bots = await this.prisma.botModel.findUnique({
+        const bots = await this.prisma.botModel.findMany({
             where: { name: 'Nazoratchi bot' },
         });
 
-        const tokenlar = await this.prisma.userBot.findMany({
-            where: { botModelId: bots?.id },
-        });
+        for (const botModel of bots) {
+            const tokenlar = await this.prisma.userBot.findMany({
+                where: { botModelId: botModel.id },
+            });
 
-        for (const botTokenLog of tokenlar) {
-            await this.startBot(botTokenLog.botToken, botTokenLog.userId);
+            for (const botTokenLog of tokenlar) {
+                await this.startBot(botTokenLog.botToken, botTokenLog.userId);
+            }
         }
     }
 
