@@ -21,7 +21,9 @@ async function bootstrap() {
   await app.startAllMicroservices();
   console.log('🟢 Observer Bot Microservice is listening via RabbitMQ');
 
-  await app.listen(2008)
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
+  console.log(`🌐 HTTP server listening on port ${port}`);
 }
 
 bootstrap();
